@@ -1,0 +1,29 @@
+import cv2
+import numpy as np
+from skimage import measure
+from skimage.measure import regionprops
+import matplotlib.pyplot as plt
+
+class HeadMRIAnalysis:
+    def __init__(self, image_path):
+        self.image_path = image_path
+        self.image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if self.image is None:
+            raise ValueError("Image cannot be loaded, double check file path.")
+        self.tumor_present = False
+        self.tumor_type = "No tumor"
+        self.tumor_size = (0, 0)
+        self.tumor_location = (0, 0)
+        self.processed_image = None
+
+    def analyze(self):
+        self._preprocess_image()
+        self._detect_tumor()
+        if self.tumor_present:
+            self._classify_tumor()
+            self._measure_size()
+
+    def _preprocess_image(self):
+        blurred = cv2.GaussianBlur(self.image, (5, 5), 0)
+        clahe = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8))
+        self.processed_image = clahe.apply(blurred)

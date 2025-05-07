@@ -32,4 +32,6 @@ class HeadMRIAnalysis:
         threshold = cv2.adaptiveThreshold(
             self.processed_image, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 2)
+            cv2.THRESH_BINARY_INV, 11, 2) 
+
+        

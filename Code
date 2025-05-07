@@ -27,3 +27,9 @@ class HeadMRIAnalysis:
         blurred = cv2.GaussianBlur(self.image, (5, 5), 0)
         clahe = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8))
         self.processed_image = clahe.apply(blurred)
+
+    def _detect_tumor(self):
+        threshold = cv2.adaptiveThreshold(
+            self.processed_image, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 11, 2)

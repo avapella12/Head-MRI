@@ -34,4 +34,28 @@ class HeadMRIAnalysis:
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, 11, 2) 
 
+        kernel = np.ones((3, 3), np.uint8)
+        cleaned = cv2.morphologyEx(threshold, cv2.MORPH_OPEN, kernel, iterations=2)
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=4)        
+        labels = measure.label(cleaned)        
+        regions = regionprops(labels)        
+        height, width = self.image.shape        
+        min_area = 0.005 * height * width        
+        max_area = 0.3 * height * width        
+        potench_tumors = []        
+        for region in regions:            
+            if min_area < region.area < max_area:       
+                mean_intensity = np.mean(self.image[region.coords[:,0], region.coords[:,1]])              
+                if mean_intensity > np.mean(self.image) * 1.2:                
+                    potench_tumors.append(region)
+        if potench_tumors:
+            largest_tumor = max(potench_tumors, key=lambda x: x.area)
+            self.tumor_present = True
+            self.tumor_location = largest_tumor.centroid
+            self.tumor_mask = np.zeros_like(self.image, dtype=np.uint8)
+            for coord in largest_tumor.coords:
+                self.tumor_mask[coord[0], coord[1]] = 255
+
+        
+
         

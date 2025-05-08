@@ -56,6 +56,38 @@ class HeadMRIAnalysis:
             for coord in largest_tumor.coords:
                 self.tumor_mask[coord[0], coord[1]] = 255
 
+    def _classify_tumor(self):
+      height, width = self.image.shape
+      y, x = self.tumor_location
+      pituitary_region = (
+          width * 0.4 < x < width * 0.6 and
+          height * 0.6 < y < height * 0.9)
+      contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+      if contours:
+        cnt = max(contours, key = cv2.contourArea)
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull)
+        cnt_area = cv2.contourArea(cnt)
+        solidity = float(cnt_area) / hull_area if hull_area > 0 else 0
+
+        ellipse = cv2.fitEllipse(cnt)
+        (center, axes, orientation) = ellipse
+        major_axis, minor_axis = max(axes), min(axes)
+        eccentricity = np.sqrt(1 - (minor_axis / major_axis) ** 2)
+
+        meningioma = (
+            solidity < 0.85 and
+            eccentricity > 0.7 and
+            not pituitary_region)
+        else:
+          meningioma = False
+
+        if pituitary_region:
+          self.tumor_type = "Pituitary Tumor"
+        elif meningioma:
+          self.tumor_type = "Meningioma"
+        else:
+          self.tumor_type = "Glioma"
         
 
         

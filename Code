@@ -4,6 +4,8 @@ from skimage import measure
 from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 
+# Lilly, 10 Hours, transfered from original faulty repository to this one by Ava on 5/7
+# Defining parameters
 class HeadMRIAnalysis:
     def __init__(self, image_path):
         self.image_path = image_path
@@ -16,24 +18,29 @@ class HeadMRIAnalysis:
         self.tumor_location = (0, 0)
         self.processed_image = None
 
+    #defining anaylsis functions
     def analyze(self):
         self._preprocess_image()
         self._detect_tumor()
         if self.tumor_present:
             self._classify_tumor()
             self._measure_size()
-
+    #preprocessing the image
     def _preprocess_image(self):
         blurred = cv2.GaussianBlur(self.image, (5, 5), 0)
         clahe = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8))
         self.processed_image = clahe.apply(blurred)
 
+    # Ava, 4 hours, after looking through and revising earlier code, also added Proposal and Code notes to note document
+    #Further image preprocessing and thresholding
     def _detect_tumor(self):
         threshold = cv2.adaptiveThreshold(
             self.processed_image, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, 11, 2) 
 
+        # Lilly, 6 hours
+        # defines parameters of potential tumors in terms of location, area, and signal intensity
         kernel = np.ones((3, 3), np.uint8)
         cleaned = cv2.morphologyEx(threshold, cv2.MORPH_OPEN, kernel, iterations=2)
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=4)        
@@ -56,6 +63,8 @@ class HeadMRIAnalysis:
             for coord in largest_tumor.coords:
                 self.tumor_mask[coord[0], coord[1]] = 255
 
+    # Ava, 10 Hours
+    # classification of tumors as Gliomas, Meningiomas, or Pituitary Tumors based on axes and countour
     def _classify_tumor(self):
       height, width = self.image.shape
       y, x = self.tumor_location
@@ -81,7 +90,7 @@ class HeadMRIAnalysis:
             solidity < 0.85 and
             eccentricity > 0.7 and
             not pituitary_region)
-            
+
       if pituitary_region:
         self.tumor_type = "Pituitary Tumor"
       elif meningioma:
@@ -89,6 +98,8 @@ class HeadMRIAnalysis:
       else:
         self.tumor_type = "Glioma"
 
+    # Lilly and Ava, 15 hours - Lilly's Codespace not working so edits were made collaboratively using Google CoLab
+    # Tumor size measurement
     def _measure_size(self):
       contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
       if contours:
@@ -96,6 +107,7 @@ class HeadMRIAnalysis:
         x, y, w, h = cv2.boundingRect(cnt)
         self.tumor_size = (w, h)
 
+    # obtaining results of classification
     def get_results(self):
         return {
             "tumor_present": self.tumor_present,
@@ -103,6 +115,7 @@ class HeadMRIAnalysis:
             "tumor_size_pixels": self.tumor_size,
             "tumor_location": self.tumor_location}
 
+    # results if there is no tumor present
     def visualize(self):
       if not hasattr(self, 'tumor_mask'):
         print("No tumor detected. Healthy physiology")
@@ -119,12 +132,14 @@ class HeadMRIAnalysis:
         x, y, w, h = cv2.boundingRect(cnt)
         cv2.rectangle(vis, (x, y), (x + w, y + h), (0, 255, 255), 2)
 
+      # code for the display of results
       plt.figure(figsize = (10, 10))
       plt.imshow(vis)
       plt.title(f"Tumor Analysis\nType: {self.tumor_type}\nSize: {self.tumor_size} pixels")
       plt.axis('off')
       plt.show()
 
+# displaying the results
 if __name__ == "__main__":
   analyzer = HeadMRIAnalysis("image.jpg")
   analyzer.analyze()

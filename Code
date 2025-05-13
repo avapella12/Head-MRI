@@ -63,6 +63,7 @@ class HeadMRIAnalysis:
           width * 0.4 < x < width * 0.6 and
           height * 0.6 < y < height * 0.9)
       contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+      meningioma = False
       if contours:
         cnt = max(contours, key = cv2.contourArea)
         hull = cv2.convexHull(cnt)
@@ -70,24 +71,23 @@ class HeadMRIAnalysis:
         cnt_area = cv2.contourArea(cnt)
         solidity = float(cnt_area) / hull_area if hull_area > 0 else 0
 
-        ellipse = cv2.fitEllipse(cnt)
-        (center, axes, orientation) = ellipse
-        major_axis, minor_axis = max(axes), min(axes)
-        eccentricity = np.sqrt(1 - (minor_axis / major_axis) ** 2)
+        if len(cnt) >= 5:
+          ellipse = cv2.fitEllipse(cnt)
+          (center, axes, orientation) = ellipse
+          major_axis, minor_axis = max(axes), min(axes)
+          eccentricity = np.sqrt(1 - (minor_axis / major_axis) ** 2)
 
-        meningioma = (
+          meningioma = (
             solidity < 0.85 and
             eccentricity > 0.7 and
             not pituitary_region)
-        else:
-          meningioma = False
-
-        if pituitary_region:
-          self.tumor_type = "Pituitary Tumor"
-        elif meningioma:
-          self.tumor_type = "Meningioma"
-        else:
-          self.tumor_type = "Glioma"
+            
+      if pituitary_region:
+        self.tumor_type = "Pituitary Tumor"
+      elif meningioma:
+        self.tumor_type = "Meningioma"
+      else:
+        self.tumor_type = "Glioma"
 
     def _measure_size(self):
       contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -110,7 +110,7 @@ class HeadMRIAnalysis:
 
       vis = cv2.cvtColor(self.image, cv2.COLOR_GRAY2BGR)
       vis[self.tumor_mask == 255] = [255, 0, 0]
-      cv2.drawMarker(vis, int(self.tumor_location[1], int(self.tumor_location[0])),
+      cv2.drawMarker(vis, (int(self.tumor_location[1]), int(self.tumor_location[0])),
        (0, 255, 0), markerType = cv2.MARKER_CROSS, markerSize = 20, thickness = 2)
       contours, _ = cv2.findContours(
           self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -121,7 +121,7 @@ class HeadMRIAnalysis:
 
       plt.figure(figsize = (10, 10))
       plt.imshow(vis)
-      plt.title(f"Tumor Analysis/nType: {self.tumor_type}/nSize: {self.tumor_size} pixels")
+      plt.title(f"Tumor Analysis\nType: {self.tumor_type}\nSize: {self.tumor_size} pixels")
       plt.axis('off')
       plt.show()
 

@@ -88,6 +88,55 @@ class HeadMRIAnalysis:
           self.tumor_type = "Meningioma"
         else:
           self.tumor_type = "Glioma"
+
+    def _measure_size(self):
+      contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+      if contours:
+        cnt = max(contours, key = cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(cnt)
+        self.tumor_size = (w, h)
+
+    def get_results(self):
+        return {
+            "tumor_present": self.tumor_present,
+            "tumor_type": self.tumor_type,
+            "tumor_size_pixels": self.tumor_size,
+            "tumor_location": self.tumor_location}
+
+    def visualize(self):
+      if not hasattr(self, 'tumor_mask'):
+        print("No tumor detected. Healthy physiology")
+        return
+
+      vis = cv2.cvtColor(self.image, cv2.COLOR_GRAY2BGR)
+      vis[self.tumor_mask == 255] = [255, 0, 0]
+      cv2.drawMarker(vis, int(self.tumor_location[1], int(self.tumor_location[0])),
+       (0, 255, 0), markerType = cv2.MARKER_CROSS, markerSize = 20, thickness = 2)
+      contours, _ = cv2.findContours(
+          self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+      if contours:
+        cnt = max(contours, key = cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(cnt)
+        cv2.rectangle(vis, (x, y), (x + w, y + h), (0, 255, 255), 2)
+
+      plt.figure(figsize = (10, 10))
+      plt.imshow(vis)
+      plt.title(f"Tumor Analysis/nType: {self.tumor_type}/nSize: {self.tumor_size} pixels")
+      plt.axis('off')
+      plt.show()
+
+if __name__ == "__main__":
+  analyzer = HeadMRIAnalysis("image.jpg")
+  analyzer.analyze()
+
+  results = analyzer.get_results()
+  print("Analysis Results:")
+  print(f"Tumor Present: {results['tumor_present']}")
+  print(f"Tumor Type: {results['tumor_type']}")
+  print(f"Tumor Size (width, height in pixels): {results['tumor_size_pixels']}")
+  print(f"Tumor Location (x, y): {results['tumor_location']}")
+
+  analyzer.visualize()      
         
 
         

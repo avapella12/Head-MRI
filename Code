@@ -143,17 +143,25 @@ class HeadMRIAnalysis:
 
 # Displaying the results
 if __name__ == "__main__":
-  analyzer = HeadMRIAnalysis("image.jpg")
-  analyzer.analyze()
+    folder_path = "/Users/avapellagrini/Downloads/Cancer"
+    image_paths = load_jpg_images_from_folder(folder_path, as_arrays=False)
 
-  results = analyzer.get_results()
-  print("Analysis Results:")
-  print(f"Tumor Present: {results['tumor_present']}")
-  print(f"Tumor Type: {results['tumor_type']}")
-  print(f"Tumor Size (width, height in pixels): {results['tumor_size_pixels']}")
-  print(f"Tumor Location (x, y): {results['tumor_location']}")
+    for path in image_paths:
+        print(f"\nAnalyzing image: {os.path.basename(path)}")
+        try:
+            analyzer = HeadMRIAnalysis(path)
+            analyzer.analyze()
+            results = analyzer.get_results()
 
-  analyzer.visualize()      
+            print(f"Tumor Present: {results['tumor_present']}")
+            print(f"Tumor Type: {results['tumor_type']}")
+            print(f"Tumor Size (width, height in pixels): {results['tumor_size_pixels']}")
+            print(f"Tumor Location (x, y): {results['tumor_location']}")
+
+            analyzer.visualize()
+
+        except ValueError as e:
+            print(f"Error processing {path}: {e}")       
         
 
         

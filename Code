@@ -1,167 +1,259 @@
 # Importing relevant packages
 import cv2
+import os
 import numpy as np
 from skimage import measure
 from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 
-# Lilly, 10 Hours, transfered from original faulty repository to this one by Ava on 5/7
+# Allowing access to google drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Lilly and Ava, 10 Hours
+# Obtains images from specific folder that is saved locally on computer as .jpgs
+def load_jpg_images_from_folder(folder_path, as_arrays=False):
+    image_files = []
+    for filename in os.listdir(folder_path):
+        if filename.lower().endswith(('.jpg', '.jpeg')):
+            full_path = os.path.join(folder_path, filename)
+            if as_arrays:
+                img = cv2.imread(full_path, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
+                    image_files.append(img)
+            else:
+                image_files.append(full_path)
+    return image_files
+
+# Defines the folder path using the pathname from Google Drive
+folder_path = "/content/drive/MyDrive/Cancer"
+
+images = load_jpg_images_from_folder(folder_path, as_arrays=False)
+
+# Lilly, 10 Hours, transferred from original faulty repository to this one by Ava on 5/7
+# Lilly and Ava, 10 Hours, revising and debugging
 # Defining parameters
 class HeadMRIAnalysis:
     def __init__(self, image_path):
         self.image_path = image_path
         self.image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if self.image is None:
-            raise ValueError("Image cannot be loaded, double check file path.")
+            raise ValueError("Image will not load, double check the file path.")
         self.tumor_present = False
-        self.tumor_type = "No tumor"
-        self.tumor_size = (0, 0)
-        self.tumor_location = (0, 0)
+        self.tumor_mask = None
         self.processed_image = None
+        self.tumor_location = None
+        self.tumor_type = "No Tumor"
+        self.tumor_size = (0, 0)
 
     # Defining anaylsis functions
     def analyze(self):
         self._preprocess_image()
-        self._detect_tumor()
-        if self.tumor_present:
-            self._classify_tumor()
-            self._measure_size()
+        self._enhanced_thresholding()
+        self._refine_tumor_candidates()
+        self._classify_tumor()
+        self._measure_size()
+        
     # Preprocessing the image
     def _preprocess_image(self):
-        blurred = cv2.GaussianBlur(self.image, (5, 5), 0)
-        clahe = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8))
-        self.processed_image = clahe.apply(blurred)
+        height, width = self.image.shape
+        self.image = cv2.resize(self.image, (500, int(500*height/width)))
+        denoised = cv2.fastNlMeansDenoising(self.image, None, h=15, templateWindowSize=7, searchWindowSize=21)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        self.processed_image = clahe.apply(denoised)
+
+    # Further thresholding
+    def _enhanced_thresholding(self):
+        adaptive_thresh = cv2.adaptiveThreshold(
+            self.processed_image, 255, 
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 51, 7)  
+            
+        _, otsu_thresh = cv2.threshold(
+            self.processed_image, 0, 255, 
+            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        combined = cv2.bitwise_or(adaptive_thresh, otsu_thresh)      
+        self.thresholded = combined
 
     # Ava, 4 hours, after looking through and revising earlier code, also added Proposal and Code notes to note document
     # Further image preprocessing and thresholding
-    def _detect_tumor(self):
-        threshold = cv2.adaptiveThreshold(
-            self.processed_image, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 11, 2) 
+    # Ava and Lilly, 10 hours revising and debugging
+    def _refine_tumor_candidates(self):
 
-        # Lilly, 6 hours
-        # Defines parameters of potential tumors in terms of location, area, and signal intensity
-        kernel = np.ones((3, 3), np.uint8)
-        cleaned = cv2.morphologyEx(threshold, cv2.MORPH_OPEN, kernel, iterations=2)
-        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel, iterations=4)        
-        labels = measure.label(cleaned)        
-        regions = regionprops(labels)        
-        height, width = self.image.shape        
-        min_area = 0.005 * height * width        
-        max_area = 0.3 * height * width        
-        potench_tumors = []        
-        for region in regions:            
-            if min_area < region.area < max_area:       
-                mean_intensity = np.mean(self.image[region.coords[:,0], region.coords[:,1]])              
-                if mean_intensity > np.mean(self.image) * 1.2:                
-                    potench_tumors.append(region)
-        if potench_tumors:
-            largest_tumor = max(potench_tumors, key=lambda x: x.area)
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        opened = cv2.morphologyEx(self.thresholded, cv2.MORPH_OPEN, kernel, iterations=2)
+        closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=3)
+        
+        # Removing small artifacts
+        cleaned = cv2.erode(closed, None, iterations=1)
+        cleaned = cv2.dilate(cleaned, None, iterations=2)
+
+        # Connected component analysis including intensity filtering
+        labels = measure.label(cleaned)
+        regions = measure.regionprops(labels, intensity_image=self.processed_image)
+        
+        # Calculating image statistics for filtering
+        median_intensity = np.median(self.processed_image)
+        std_intensity = np.std(self.processed_image)
+        
+        # Filter regions based on multiple criteria
+        valid_regions = []
+        for region in regions:
+            # Size criteria 
+            if not (100 < region.area < 10000):
+                continue
+                
+            # Intensity criteria 
+            if region.mean_intensity < median_intensity + std_intensity * 0.5:
+                continue
+            
+            # Shape Criteria
+            eccentricity = region.eccentricity
+            solidity = region.solidity
+
+            # For round or slightly irregular shapes
+            if not (0.1 < eccentricity < 0.9) or solidity < 0.7:
+                continue
+                
+            valid_regions.append(region)
+        
+        # Selecting the brightest/largest tumor
+        if valid_regions:
             self.tumor_present = True
-            self.tumor_location = largest_tumor.centroid
-            self.tumor_mask = np.zeros_like(self.image, dtype=np.uint8)
-            for coord in largest_tumor.coords:
-                self.tumor_mask[coord[0], coord[1]] = 255
+            best_tumor = max(valid_regions, key=lambda r: r.mean_intensity * np.sqrt(r.area))
+            
+            self.tumor_location = best_tumor.centroid
+            # Creating smooth mask using convex hull
+            self.tumor_mask = np.zeros_like(self.processed_image, dtype=np.uint8)
+            coords = best_tumor.coords
+            hull = cv2.convexHull(np.array([coords[:, [1, 0]]]))
+            cv2.fillConvexPoly(self.tumor_mask, hull, 255)
+            
+            # Calculating tumor properties
+            self.tumor_properties = {
+                'area': best_tumor.area,
+                'centroid': best_tumor.centroid,
+                'mean_intensity': best_tumor.mean_intensity,
+                'bbox': best_tumor.bbox
+            }
 
-    # Ava, 10 Hours
-    # Classification of tumors as Gliomas, Meningiomas, or Pituitary Tumors based on axes and countour
     def _classify_tumor(self):
-      height, width = self.image.shape
-      y, x = self.tumor_location
-      pituitary_region = (
-          width * 0.4 < x < width * 0.6 and
-          height * 0.6 < y < height * 0.9)
-      contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-      meningioma = False
-      if contours:
-        cnt = max(contours, key = cv2.contourArea)
-        hull = cv2.convexHull(cnt)
-        hull_area = cv2.contourArea(hull)
-        cnt_area = cv2.contourArea(cnt)
-        solidity = float(cnt_area) / hull_area if hull_area > 0 else 0
+        if not self.tumor_present:
+            return
+    
+        height, width = self.image.shape
+        y, x = self.tumor_properties['centroid']
+        
+        # Defining general brain regions 
+        pituitary_region = (
+            width * 0.4 < x < width * 0.6 and
+            height * 0.6 < y < height * 0.9)
+    
+        # Analyzing the tumor shape
+        contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        meningioma = False
+    
+        if contours:
+            cnt = max(contours, key=cv2.contourArea)
+            hull = cv2.convexHull(cnt)
+            hull_area = cv2.contourArea(hull)
+            cnt_area = cv2.contourArea(cnt)
+            solidity = float(cnt_area)/hull_area if hull_area > 0 else 0
 
-        if len(cnt) >= 5:
-          ellipse = cv2.fitEllipse(cnt)
-          (center, axes, orientation) = ellipse
-          major_axis, minor_axis = max(axes), min(axes)
-          eccentricity = np.sqrt(1 - (minor_axis / major_axis) ** 2)
+            if len(cnt) >= 5:
+                ellipse = cv2.fitEllipse(cnt)
+                (center, axes, orientation) = ellipse
+                major_axis, minor_axis = max(axes), min(axes)
+                eccentricity = np.sqrt(1 - (minor_axis/major_axis)**2)
 
-          meningioma = (
-            solidity < 0.85 and
-            eccentricity > 0.7 and
-            not pituitary_region)
+                meningioma = (
+                    solidity < 0.85 and
+                    eccentricity > 0.7 and
+                    not pituitary_region)
+                
+        if pituitary_region:
+            if contours:
+                cnt = max(contours, key=cv2.contourArea)
+                perimeter = cv2.arcLength(cnt, True)
+                circularity = (4*np.pi*cv2.contourArea(cnt))/(perimeter**2) if perimeter > 0 else 0
+                self.tumor_type = "Pituitary Tumor" if circularity > 0.6 else "Glioma"
+        elif meningioma:
+            self.tumor_type = "Meningioma"
+        else:
+            self.tumor_type = "Glioma"
 
-      # Defining Possible outputs based on measured parameters
-      if pituitary_region:
-        self.tumor_type = "Pituitary Tumor"
-      elif meningioma:
-        self.tumor_type = "Meningioma"
-      else:
-        self.tumor_type = "Glioma"
-
-    # Lilly and Ava, 15 hours - Lilly's Codespace not working so edits were made collaboratively using Google CoLab
-    # Tumor size measurement
     def _measure_size(self):
-      contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-      if contours:
-        cnt = max(contours, key = cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(cnt)
-        self.tumor_size = (w, h)
+        if not self.tumor_present:
+            return
+        if hasattr(self, 'tumor_properties') and 'bbox' in self.tumor_properties:
+            bbox = self.tumor_properties['bbox']
+            self.tumor_size = (bbox[3] - bbox[1], bbox[2] - bbox[0])
 
-    # Obtaining results of classification
-    def get_results(self):
-        return {
-            "tumor_present": self.tumor_present,
-            "tumor_type": self.tumor_type,
-            "tumor_size_pixels": self.tumor_size,
-            "tumor_location": self.tumor_location}
 
-    # Results if there is no tumor present
-    def visualize(self):
-      if not hasattr(self, 'tumor_mask'):
-        print("No tumor detected. Healthy physiology")
-        return
+    # Lilly and Ava, 10 hours
+    def visualize_results(self):
+        if not self.tumor_present:
+            print("No tumor detected in this image")
+            return
+        
+        # Creating color visualization
+        vis = cv2.cvtColor(self.processed_image, cv2.COLOR_GRAY2BGR)
+        
+        # Creating colored mask
+        mask_color = np.zeros_like(vis)
+        mask_color[self.tumor_mask == 255] = [0, 0, 255]  # Red
+        
+        # Blending with original image
+        alpha = 0.4
+        vis = cv2.addWeighted(vis, 1, mask_color, 0.4, 0)
+        
+        # Drawing a boundary
+        contours, _ = cv2.findContours(self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            cv2.drawContours(vis, contours, -1, (0, 255, 0), 2)
+            cnt = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(cnt)
+            cv2.rectangle(vis, (x, y), (x+w, y+h), (0, 255, 255), 2)
+        
+        cy, cx = self.tumor_properties['centroid']
+        cv2.drawMarker(vis, (int(cx), int(cy)), (255, 255, 0), cv2.MARKER_CROSS, 20, 2)
+        
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(vis, f"Type: {self.tumor_type}", (10, 30), font, 0.8, (255, 255, 255), 2)
+        cv2.putText(vis, f"Size: {self.tumor_size[0]}x{self.tumor_size[1]}px", (10, 70), font, 0.8, (255, 255, 255), 2)
+        cv2.putText(vis, f"Location: ({cx:.1f}, {cy:.1f})", (10, 110), font, 0.8, (255, 255, 255), 2)
 
-      vis = cv2.cvtColor(self.image, cv2.COLOR_GRAY2BGR)
-      vis[self.tumor_mask == 255] = [255, 0, 0]
-      cv2.drawMarker(vis, (int(self.tumor_location[1]), int(self.tumor_location[0])),
-       (0, 255, 0), markerType = cv2.MARKER_CROSS, markerSize = 20, thickness = 2)
-      contours, _ = cv2.findContours(
-          self.tumor_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-      if contours:
-        cnt = max(contours, key = cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(cnt)
-        cv2.rectangle(vis, (x, y), (x + w, y + h), (0, 255, 255), 2)
-
-      # code for the display of results
-      plt.figure(figsize = (10, 10))
-      plt.imshow(vis)
-      plt.title(f"Tumor Analysis\nType: {self.tumor_type}\nSize: {self.tumor_size} pixels")
-      plt.axis('off')
-      plt.show()
+        plt.figure(figsize=(10, 10))
+        plt.imshow(vis)
+        plt.title("MRI Analysis Results")
+        plt.axis('off')
+        plt.show()
 
 # Displaying the results
+
 if __name__ == "__main__":
-    folder_path = "/Users/avapellagrini/Downloads/Cancer"
+    folder_path = "/content/drive/MyDrive/Cancer"
     image_paths = load_jpg_images_from_folder(folder_path, as_arrays=False)
-
-    for path in image_paths:
-        print(f"\nAnalyzing image: {os.path.basename(path)}")
+    
+    for image_path in image_paths:
+        print(f"\nAnalyzing: {os.path.basename(image_path)}")
         try:
-            analyzer = HeadMRIAnalysis(path)
+            analyzer = HeadMRIAnalysis(image_path)
             analyzer.analyze()
-            results = analyzer.get_results()
-
-            print(f"Tumor Present: {results['tumor_present']}")
-            print(f"Tumor Type: {results['tumor_type']}")
-            print(f"Tumor Size (width, height in pixels): {results['tumor_size_pixels']}")
-            print(f"Tumor Location (x, y): {results['tumor_location']}")
-
-            analyzer.visualize()
-
-        except ValueError as e:
-            print(f"Error processing {path}: {e}")       
+            analyzer.visualize_results()
+            
+            print("\nDetailed Results:")
+            print(f"Tumor Present: {analyzer.tumor_present}")
+            if analyzer.tumor_present:
+                print(f"Classification: {analyzer.tumor_type}")
+                print(f"Size (w x h): {analyzer.tumor_size[0]} x {analyzer.tumor_size[1]} pixels")
+                print(f"Location (x,y): ({analyzer.tumor_location[1]:.1f}, {analyzer.tumor_location[0]:.1f})")
+                print(f"Mean Intensity: {analyzer.tumor_properties['mean_intensity']:.1f}")
+                
+        except Exception as e:
+            print(f"Error processing {image_path}: {str(e)}")
         
 
         
